@@ -86,12 +86,33 @@ class SequentialAttentionLayer(GeneratorLayer):
         ff = ff * mask_pad
         return ff
 
+class ModifiedConcateAttentionLayer(GeneratorLayer):
+    def __init__(self, d_model=512, n_heads=8, d_ff=2048, dropout=0.1, n_memories=0):
+        super().__init__(d_model, n_heads, d_ff, dropout, n_memories)
+        self.vis_att1 = MultiHeadAttention(d_model, n_heads, dropout, can_be_stateful=False, n_memories=n_memories)
+        self.vis_att2 = MultiHeadAttention(d_model, n_heads, dropout, can_be_stateful=False, n_memories=n_memories)
+
+    def forward(self, x, y1, y2, mask_pad, mask_x, mask_y1, mask_y2):
+        self_att = self.self_att(x, x, x, mask_x)
+        self_att = self_att * mask_pad
+        
+        enc_att1 = self.vis_att1(self_att, y1, y1, mask_y1) * mask_pad
+        enc_att2 = self.vis_att2(self_att, y2, y2, mask_y2) * mask_pad
+
+        enc_att = torch.cat([enc_att1, enc_att2], dim=1) #TODO: check the dimension
+        enc_att = enc_att * mask_pad
+
+        ff = self.pwff(enc_att)
+        ff = ff * mask_pad
+        return ff
+
 
 class CaptionGenerator(Module):
     GENERATOR_LAYER = {
         'concat': ConcatAttentionLayer,
         'parallel': ParallelAttentionLayer,
         'sequential': SequentialAttentionLayer,
+        'modified_concat': ModifiedConcateAttentionLayer,
     }
 
     def __init__(self,
@@ -171,5 +192,15 @@ class CaptionGenerator(Module):
 
             for layer in self.layers:
                 x = layer(x, y1, y2, mask_pad, mask_x, mask_y1, mask_y2)
+        
+        if self.decoder_name == 'modified_concat':
+            y1 = vis_inputs['gri_feat']
+            y2 = vis_inputs['reg_feat']
+            mask_y1 = vis_inputs['gri_mask']
+            mask_y2 = vis_inputs['reg_mask']
+
+            for layer in self.layers:
+                x = layer(x, y1, y2, mask_pad, mask_x, mask_y1, mask_y2)
+
         x = self.fc(x)
         return F.log_softmax(x, dim=-1)
