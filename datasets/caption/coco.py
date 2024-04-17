@@ -216,7 +216,7 @@ class COCO(CPairedDataset):
             ids['train'] = np.load(os.path.join(ann_root, 'coco_train_ids.npy'))
             ids['valid'] = np.load(os.path.join(ann_root, 'coco_dev_ids.npy'))
             if cut_validation:
-                ids['valid'] = ids['valid'][:5000]
+                ids['valid'] = ids['valid'][:500] # modified from 5000 -> 500
             ids['test'] = np.load(os.path.join(ann_root, 'coco_test_ids.npy'))
             ids['trainrestval'] = (ids['train'], np.load(os.path.join(ann_root, 'coco_restval_ids.npy')))
 
