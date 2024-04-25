@@ -106,6 +106,45 @@ class ModifiedConcateAttentionLayer(GeneratorLayer):
         ff = ff * mask_pad
         return ff
 
+class ParallelAttentionLayer_concat(GeneratorLayer):
+    def __init__(self, d_model=512, n_heads=8, d_ff=2048, dropout=.1, activation='sigmoid', n_memories=0):
+        super().__init__(d_model=d_model, n_heads=n_heads, d_ff=d_ff, dropout=dropout, n_memories=0)
+
+        self.vis_att1 = MultiHeadAttention(d_model, n_heads, dropout, can_be_stateful=False, n_memories=n_memories)
+        self.vis_att2 = MultiHeadAttention(d_model, n_heads, dropout, can_be_stateful=False, n_memories=n_memories)
+
+        self.fc_alpha1 = nn.Linear(d_model + d_model, d_model)
+        self.fc_alpha2 = nn.Linear(d_model + d_model, d_model)
+        self.fc_cat = nn.Linear(d_model + d_model, d_model)
+        self.activation = activation
+
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_uniform_(self.fc_alpha1.weight)
+        nn.init.xavier_uniform_(self.fc_alpha2.weight)
+        nn.init.constant_(self.fc_alpha1.bias, 0)
+        nn.init.constant_(self.fc_alpha2.bias, 0)
+
+    def forward(self, x, y1, y2, mask_pad, mask_x, mask_y1, mask_y2):
+        self_att = self.self_att(x, x, x, mask_x)
+        self_att = self_att * mask_pad
+
+        enc_att1 = self.vis_att1(self_att, y1, y1, mask_y1) * mask_pad
+        enc_att2 = self.vis_att2(self_att, y2, y2, mask_y2) * mask_pad
+
+        # [B, N, D]
+        alpha1 = torch.sigmoid(self.fc_alpha1(torch.cat([self_att, enc_att1], -1)))
+        alpha2 = torch.sigmoid(self.fc_alpha1(torch.cat([self_att, enc_att2], -1)))
+
+        # enc_att = (enc_att1 * alpha1 + enc_att2 * alpha2) / np.sqrt(2)
+        # enc_att = enc_att * mask_pad
+        # concat the two attention
+        enc_att = self.fc_cat(torch.cat([enc_att1 * alpha1, enc_att2 * alpha2], -1))
+        enc_att = enc_att * mask_pad
+        ff = self.pwff(enc_att)
+        ff = ff * mask_pad
+        return ff
 
 class CaptionGenerator(Module):
     GENERATOR_LAYER = {
@@ -113,6 +152,7 @@ class CaptionGenerator(Module):
         'parallel': ParallelAttentionLayer,
         'sequential': SequentialAttentionLayer,
         'modified_concat': ModifiedConcateAttentionLayer,
+        'parallel_concat': ParallelAttentionLayer_concat
     }
 
     def __init__(self,
@@ -194,6 +234,15 @@ class CaptionGenerator(Module):
                 x = layer(x, y1, y2, mask_pad, mask_x, mask_y1, mask_y2)
         
         if self.decoder_name == 'modified_concat':
+            y1 = vis_inputs['gri_feat']
+            y2 = vis_inputs['reg_feat']
+            mask_y1 = vis_inputs['gri_mask']
+            mask_y2 = vis_inputs['reg_mask']
+
+            for layer in self.layers:
+                x = layer(x, y1, y2, mask_pad, mask_x, mask_y1, mask_y2)
+
+        if self.decoder_name == 'parallel_concat':
             y1 = vis_inputs['gri_feat']
             y2 = vis_inputs['reg_feat']
             mask_y1 = vis_inputs['gri_mask']
