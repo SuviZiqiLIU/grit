@@ -45,7 +45,7 @@ model:
     n_layers: 3
 
   cap_generator:
-    decoder_name: modified_concat # parallel # sequential concat
+    decoder_name: parallel # modified_concat # parallel # sequential concat
     n_layers: 3
 
   detector: 
